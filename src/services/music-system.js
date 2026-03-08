@@ -1,6 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { DisTube, RepeatMode } = require("distube");
-const { YouTubePlugin } = require("@distube/youtube");
 const { YtDlpPlugin } = require("@distube/yt-dlp");
 
 function truncate(text, maxLength = 1800) {
@@ -95,12 +94,7 @@ class MusicSystem {
     this.sessions = new Map();
     this.snapshotCatalog = new Map();
 
-    // YouTubePlugin: maneja búsquedas de texto y URLs de YouTube
-    const youtubePlugin = config.audio.youtubeCookies
-      ? new YouTubePlugin({ cookies: config.audio.youtubeCookies })
-      : new YouTubePlugin();
-
-    // YtDlpPlugin: maneja URLs directas de otros sitios (debe ir último)
+    // YtDlpPlugin maneja búsquedas (vía ytsearch:) y streams - más robusto en IPs de datacenter
     const ytDlpOptions = {
       update: false, // yt-dlp instalado via pip en Dockerfile
     };
@@ -127,7 +121,7 @@ class MusicSystem {
     }
 
     this.distube = new DisTube(client, {
-      plugins: [youtubePlugin, new YtDlpPlugin(ytDlpOptions)], // yt-dlp DEBE ir último
+      plugins: [new YtDlpPlugin(ytDlpOptions)], // yt-dlp maneja búsqueda y stream
       emitNewSongOnly: true,
       savePreviousSongs: true,
     });
@@ -436,7 +430,12 @@ class MusicSystem {
     const rawQuery = interaction.options.getString("busqueda", true);
     const analysis = this.queryIntelligence.analyze(rawQuery);
     const cached = this.queryIntelligence.getCachedResolution(analysis.normalized);
-    const effectiveQuery = cached?.url ?? rawQuery;
+
+    // Si el query es texto plano (no URL), usar ytsearch: para que yt-dlp maneje
+    // tanto la búsqueda como el stream (más robusto en IPs de datacenter)
+    const isUrl = /^https?:\/\//i.test(rawQuery);
+    const baseQuery = cached?.url ?? rawQuery;
+    const effectiveQuery = (isUrl || cached?.url) ? baseQuery : `ytsearch:${baseQuery}`;
 
     await interaction.deferReply();
 
