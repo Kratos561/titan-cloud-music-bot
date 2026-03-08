@@ -87,6 +87,8 @@ const config = {
     defaultVolume: integerEnv("DEFAULT_VOLUME", 80),
     maxVolume: integerEnv("MAX_VOLUME", 200),
     youtubeCookies: readYouTubeCookies(),
+    youtubePoTokenGvs: optionalEnv("YOUTUBE_PO_TOKEN_GVS"),
+    youtubePoTokenPlayer: optionalEnv("YOUTUBE_PO_TOKEN_PLAYER"),
   },
   database: {
     url: optionalEnv("DATABASE_URL"),
