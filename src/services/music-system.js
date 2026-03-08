@@ -109,6 +109,8 @@ class MusicSystem {
       plugins: [
         new StableYtDlpPlugin({
           cookies: config.audio.youtubeCookies,
+          poTokenGvs: config.audio.youtubePoTokenGvs,
+          poTokenPlayer: config.audio.youtubePoTokenPlayer,
           logger: logger.child("yt-dlp"),
         }),
       ],
