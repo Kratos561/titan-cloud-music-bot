@@ -7,6 +7,12 @@ const { ExtractorPlugin, Playlist, Song } = require("distube");
 
 const YOUTUBE_URL_PATTERN =
   /^https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com\/|youtu\.be\/)/i;
+const DEFAULT_PIPED_API_BASES = ["https://pipedapi.kavin.rocks"];
+const DEFAULT_INVIDIOUS_API_BASES = [
+  "https://inv.nadeko.net",
+  "https://yewtu.be",
+  "https://invidious.nerdvpn.de",
+];
 
 function toSafeInteger(value, fallback = 0) {
   const parsed = Number.parseInt(value, 10);
@@ -102,6 +108,65 @@ function sanitizeFilePart(value) {
     .slice(0, 80) || "track";
 }
 
+function splitConfiguredBases(value, fallback) {
+  if (Array.isArray(value) && value.length) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  return [...fallback];
+}
+
+function extractYouTubeVideoId(url) {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("youtu.be")) {
+      return parsed.pathname.replace(/^\/+/, "").trim() || null;
+    }
+
+    if (parsed.searchParams.get("v")) {
+      return parsed.searchParams.get("v");
+    }
+
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const embedIndex = parts.findIndex((part) => part === "embed" || part === "shorts" || part === "live");
+    if (embedIndex >= 0 && parts[embedIndex + 1]) {
+      return parts[embedIndex + 1];
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function toAbsoluteUrl(baseUrl, value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value, baseUrl).href;
+  } catch {
+    return null;
+  }
+}
+
+function toFiniteNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function cleanupCacheDir(cacheDir, maxAgeMs = 6 * 60 * 60 * 1000) {
   if (!fs.existsSync(cacheDir)) {
     return;
@@ -166,6 +231,8 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     this.ytdlpPath = ytdlpPath;
     this.poTokenGvs = poTokenGvs;
     this.poTokenPlayer = poTokenPlayer;
+    this.pipedApiBases = splitConfiguredBases(process.env.PIPED_API_BASES, DEFAULT_PIPED_API_BASES);
+    this.invidiousApiBases = splitConfiguredBases(process.env.INVIDIOUS_API_BASES, DEFAULT_INVIDIOUS_API_BASES);
     this.cookieFilePath = Array.isArray(cookies) && cookies.length ? writeCookieFile(cookies) : null;
 
     if (this.cookieFilePath) {
@@ -253,6 +320,121 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     }
 
     return { combined };
+  }
+
+  async fetchJson(url, timeoutMs = 12000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return response.json();
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  pickPipedStream(baseUrl, payload) {
+    const streams = Array.isArray(payload?.audioStreams) ? payload.audioStreams : [];
+    const candidates = streams
+      .map((entry) => ({
+        url: toAbsoluteUrl(baseUrl, entry?.url),
+        bitrate: toFiniteNumber(entry?.bitrate ?? entry?.quality ?? entry?.audioQuality, 0),
+      }))
+      .filter((entry) => entry.url);
+
+    if (!candidates.length) {
+      return null;
+    }
+
+    candidates.sort((left, right) => right.bitrate - left.bitrate);
+    return candidates[0].url;
+  }
+
+  pickInvidiousStream(baseUrl, payload) {
+    const adaptiveFormats = Array.isArray(payload?.adaptiveFormats) ? payload.adaptiveFormats : [];
+    const audioFormats = adaptiveFormats
+      .filter((entry) => String(entry?.type ?? "").startsWith("audio/"))
+      .map((entry) => ({
+        url: toAbsoluteUrl(baseUrl, entry?.url),
+        bitrate: toFiniteNumber(entry?.bitrate ?? entry?.audioSampleRate, 0),
+      }))
+      .filter((entry) => entry.url);
+
+    if (audioFormats.length) {
+      audioFormats.sort((left, right) => right.bitrate - left.bitrate);
+      return audioFormats[0].url;
+    }
+
+    const muxedStreams = Array.isArray(payload?.formatStreams) ? payload.formatStreams : [];
+    const muxedCandidates = muxedStreams
+      .map((entry) => ({
+        url: toAbsoluteUrl(baseUrl, entry?.url),
+        bitrate: toFiniteNumber(entry?.bitrate ?? entry?.qualityLabel, 0),
+      }))
+      .filter((entry) => entry.url);
+
+    if (!muxedCandidates.length) {
+      return null;
+    }
+
+    muxedCandidates.sort((left, right) => right.bitrate - left.bitrate);
+    return muxedCandidates[0].url;
+  }
+
+  async tryProxyFallback(song) {
+    const videoId = extractYouTubeVideoId(song.url);
+    if (!videoId) {
+      return null;
+    }
+
+    let lastError = null;
+
+    for (const baseUrl of this.pipedApiBases) {
+      try {
+        const payload = await this.fetchJson(`${baseUrl.replace(/\/+$/, "")}/streams/${videoId}`);
+        const streamUrl = this.pickPipedStream(baseUrl, payload);
+        if (streamUrl) {
+          this.logger?.warn("Usando fallback proxy de Piped.", {
+            songId: song.id,
+            baseUrl,
+          });
+          return streamUrl;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    for (const baseUrl of this.invidiousApiBases) {
+      try {
+        const payload = await this.fetchJson(`${baseUrl.replace(/\/+$/, "")}/api/v1/videos/${videoId}`);
+        const streamUrl = this.pickInvidiousStream(baseUrl, payload);
+        if (streamUrl) {
+          this.logger?.warn("Usando fallback proxy de Invidious.", {
+            songId: song.id,
+            baseUrl,
+          });
+          return streamUrl;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    return null;
   }
 
   downloadToTempFile(song, selector = null, options = {}) {
@@ -515,6 +697,18 @@ class StableYtDlpPlugin extends ExtractorPlugin {
         if (streamUrl) {
           break;
         }
+      }
+    }
+
+    if (!streamUrl) {
+      try {
+        streamUrl = await this.tryProxyFallback(song);
+      } catch (error) {
+        lastError = error;
+        this.logger?.warn("Fallback proxy no disponible.", {
+          songId: song.id,
+          error: error.message,
+        });
       }
     }
 
