@@ -1,6 +1,6 @@
 const { EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { DisTube, RepeatMode } = require("distube");
-const { YtDlpPlugin } = require("@distube/yt-dlp");
+const { StableYtDlpPlugin } = require("../plugins/stable-yt-dlp-plugin");
 
 function truncate(text, maxLength = 1800) {
   if (!text) {
@@ -105,19 +105,13 @@ class MusicSystem {
     this.sessions = new Map();
     this.snapshotCatalog = new Map();
 
-    // YtDlpPlugin - usa el cliente Android de YouTube para bypasear bloqueos de IPs de datacenter
-    const ytDlpOptions = {
-      update: false, // yt-dlp instalado via pip en Dockerfile
-      flags: [
-        // El cliente Android bypasea restricciones de IP de datacenter que bloquean el cliente web
-        "--extractor-args", "youtube:player_client=android,web",
-        "--no-check-certificate",
-        "--no-warnings",
-      ],
-    };
-
     this.distube = new DisTube(client, {
-      plugins: [new YtDlpPlugin(ytDlpOptions)],
+      plugins: [
+        new StableYtDlpPlugin({
+          cookies: config.audio.youtubeCookies,
+          logger: logger.child("yt-dlp"),
+        }),
+      ],
       emitNewSongOnly: true,
       savePreviousSongs: true,
     });
@@ -426,42 +420,11 @@ class MusicSystem {
     const rawQuery = interaction.options.getString("busqueda", true);
     const analysis = this.queryIntelligence.analyze(rawQuery);
     const cached = this.queryIntelligence.getCachedResolution(analysis.normalized);
-    const isUrl = /^https?:\/\//i.test(rawQuery);
 
     await interaction.deferReply();
 
     try {
-      // Resolver la URL efectiva
-      let effectiveQuery = cached?.url ?? rawQuery;
-
-      // Si es texto plano (no URL ni cache), usamos yt-dlp binary para buscar en YouTube
-      // y obtener una URL directa â€” esto evita el fallo de stream en IPs de datacenter
-      if (!isUrl && !cached?.url) {
-        const { execFileSync } = require("node:child_process");
-
-        // Usar --print en vez del deprecado --get-id
-        // NO usamos cookies aqui: las cookies de browser causan conflicto en IPs de datacenter
-        const args = [
-          "--print", "%(id)s",
-          "--no-playlist",
-          "--no-warnings",
-          "--no-check-certificate",
-          `ytsearch1:${rawQuery}`,
-        ];
-
-        console.log("[YT-DLP SEARCH] Buscando:", rawQuery);
-        const output = execFileSync("yt-dlp", args, {
-          encoding: "utf8",
-          timeout: 30000,
-        }).trim();
-
-        // El output puede tener multiples lineas, tomamos la primera que sea un ID valido
-        const videoId = output.split("\n").map(l => l.trim()).find(l => /^[a-zA-Z0-9_-]{11}$/.test(l));
-
-        if (!videoId) throw new Error(`yt-dlp no encontrÃ³ resultados para: ${rawQuery}`);
-        effectiveQuery = `https://www.youtube.com/watch?v=${videoId}`;
-        console.log("[YT-DLP SEARCH] URL encontrada:", effectiveQuery);
-      }
+      const effectiveQuery = cached?.url ?? rawQuery;
 
       this.logger.info("Intentando reproducir.", {
         rawQuery,
