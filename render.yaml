@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: titan-cloud-music-bot
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    autoDeploy: false
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DASHBOARD_ADMIN_TOKEN
+        sync: false
+      - key: DEFAULT_VOLUME
+        value: 80
+      - key: MAX_VOLUME
+        value: 200
+
