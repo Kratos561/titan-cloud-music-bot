@@ -466,12 +466,14 @@ class MusicSystem {
           : `Buscando en YouTube: **${rawQuery}**`,
       );
     } catch (playError) {
-      this.logger.error("Error en distube.play().", {
-        error: playError.message,
-        code: playError.code,
-        errorName: playError.name,
-        stack: playError.stack?.split("\n").slice(0, 5).join("\n"),
-      });
+      // Log completo para diagnostico en Railway
+      console.error("=== ERROR DISTUBE.PLAY ===");
+      console.error("Mensaje:", playError.message);
+      console.error("Nombre:", playError.name);
+      console.error("Codigo:", playError.code);
+      console.error("Stack:", playError.stack);
+      if (playError.cause) console.error("Causa:", playError.cause);
+      console.error("=========================");
 
       const userMessage = playError.message?.includes("30 seconds")
         ? "No pude conectar al canal de voz en 30 segundos. Error interno: " + playError.message
