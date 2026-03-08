@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { spawnSync } = require("node:child_process");
 const { ExtractorPlugin, Playlist, Song } = require("distube");
 
@@ -274,7 +275,7 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       throw new Error(`yt-dlp no devolvio un archivo reproducible para ${song.url}`);
     }
 
-    return filePath;
+    return pathToFileURL(filePath).href;
   }
 
   createSong(entry, options = {}, fallbackUrl = null) {
@@ -394,37 +395,10 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       });
     }
 
-    for (const mode of streamModes) {
-      for (const selector of selectors) {
-        try {
-          streamUrl = parseStreamUrlFromOutput(
-            this.runYtDlp(["-f", selector, "--get-url", song.url], 45000, mode.options).combined,
-          );
-
-          if (streamUrl) {
-            break;
-          }
-        } catch (error) {
-          lastError = error;
-          this.logger?.warn("Selector de formato no disponible; probando fallback.", {
-            songId: song.id,
-            mode: mode.label,
-            selector,
-            error: error.message,
-          });
-        }
-      }
-
-      if (streamUrl) {
-        break;
-      }
-    }
-
-    if (!streamUrl) {
-      const downloadSelectors = song.isLive
-        ? ["b/best", null]
-        : ["ba/b", "b/best", null];
-      const downloadModes = [
+    const downloadSelectors = song.isLive
+      ? ["b/best", null]
+      : ["ba/b", "b/best", null];
+    const downloadModes = [
         {
           label: "download-safari-hls",
           options: {
@@ -439,23 +413,82 @@ class StableYtDlpPlugin extends ExtractorPlugin {
         { label: "download-no-cookies", options: { streamMode: true, includeCookies: false } },
         { label: "download-with-cookies", options: { streamMode: true, includeCookies: true } },
         { label: "download-default", options: { streamMode: false, includeCookies: true } },
-      ];
+    ];
 
-      if (this.poTokenGvs || this.poTokenPlayer) {
-        downloadModes.unshift({
-          label: "download-po-token-mweb",
-          options: {
-            streamMode: true,
-            includeCookies: true,
-            customBaseArgs: this.buildExtractorArgs({
-              playerClient: "mweb,default,-web,-web_creator",
-              includeMissingPoFormats: true,
-              poTokenClient: "mweb",
-            }),
-          },
-        });
+    if (this.poTokenGvs || this.poTokenPlayer) {
+      downloadModes.unshift({
+        label: "download-po-token-mweb",
+        options: {
+          streamMode: true,
+          includeCookies: true,
+          customBaseArgs: this.buildExtractorArgs({
+            playerClient: "mweb,default,-web,-web_creator",
+            includeMissingPoFormats: true,
+            poTokenClient: "mweb",
+          }),
+        },
+      });
+    }
+
+    if (!song.isLive) {
+      for (const mode of downloadModes) {
+        for (const selector of downloadSelectors) {
+          try {
+            const filePath = this.downloadToTempFile(song, selector, mode.options);
+            this.logger?.warn("Usando fallback por descarga temporal para reproducir.", {
+              songId: song.id,
+              mode: mode.label,
+              selector: selector ?? "default",
+              filePath,
+            });
+            streamUrl = filePath;
+            break;
+          } catch (error) {
+            lastError = error;
+            this.logger?.warn("Fallback por descarga temporal no disponible; probando siguiente.", {
+              songId: song.id,
+              mode: mode.label,
+              selector: selector ?? "default",
+              error: error.message,
+            });
+          }
+        }
+
+        if (streamUrl) {
+          break;
+        }
       }
+    }
 
+    if (!streamUrl) {
+      for (const mode of streamModes) {
+        for (const selector of selectors) {
+          try {
+            streamUrl = parseStreamUrlFromOutput(
+              this.runYtDlp(["-f", selector, "--get-url", song.url], 45000, mode.options).combined,
+            );
+
+            if (streamUrl) {
+              break;
+            }
+          } catch (error) {
+            lastError = error;
+            this.logger?.warn("Selector de formato no disponible; probando fallback.", {
+              songId: song.id,
+              mode: mode.label,
+              selector,
+              error: error.message,
+            });
+          }
+        }
+
+        if (streamUrl) {
+          break;
+        }
+      }
+    }
+
+    if (!streamUrl && song.isLive) {
       for (const mode of downloadModes) {
         for (const selector of downloadSelectors) {
           try {
