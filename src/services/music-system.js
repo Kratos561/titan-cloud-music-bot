@@ -243,6 +243,9 @@ class MusicSystem {
       })
       .on("debug", (message) => {
         this.logger.info("DisTube debug.", { message });
+      })
+      .on("ffmpegDebug", (message) => {
+        this.logger.info("FFmpeg debug.", { message });
       });
   }
 
