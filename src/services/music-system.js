@@ -94,7 +94,9 @@ class MusicSystem {
     this.sessions = new Map();
     this.snapshotCatalog = new Map();
 
-    const ytDlpOptions = {};
+    const ytDlpOptions = {
+      update: false, // yt-dlp is installed via pip in Dockerfile, no need to download
+    };
 
     // Convertir cookies JSON a formato Netscape (cookies.txt) para yt-dlp
     if (config.audio.youtubeCookies && Array.isArray(config.audio.youtubeCookies)) {
