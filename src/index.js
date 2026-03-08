@@ -137,3 +137,14 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+// Capturar errores no manejados para que el bot no crashee
+process.on("uncaughtException", (err) => {
+  console.error("[UNCAUGHT EXCEPTION]", err.message);
+  console.error(err.stack);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[UNHANDLED REJECTION]", reason?.message ?? reason);
+  if (reason?.stack) console.error(reason.stack);
+});
