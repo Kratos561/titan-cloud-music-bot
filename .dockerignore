@@ -1,0 +1,7 @@
+node_modules
+.env
+npm-debug.log
+render-openapi.json
+render-openapi-raw.json
+Plan_Maestro_Bot_Discord_Nube.pdf
+
