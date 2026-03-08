@@ -81,6 +81,17 @@ async function reply(interaction, payload) {
   return interaction.reply(payload);
 }
 
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${label} supero ${Math.round(timeoutMs / 1000)} segundos`));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
 class MusicSystem {
   constructor({ client, config, repository, settingsService, queryIntelligence, eventBus, logger, cloudClients }) {
     this.client = client;
@@ -424,7 +435,7 @@ class MusicSystem {
       let effectiveQuery = cached?.url ?? rawQuery;
 
       // Si es texto plano (no URL ni cache), usamos yt-dlp binary para buscar en YouTube
-      // y obtener una URL directa — esto evita el fallo de stream en IPs de datacenter
+      // y obtener una URL directa â€” esto evita el fallo de stream en IPs de datacenter
       if (!isUrl && !cached?.url) {
         const { execFileSync } = require("node:child_process");
 
@@ -447,7 +458,7 @@ class MusicSystem {
         // El output puede tener multiples lineas, tomamos la primera que sea un ID valido
         const videoId = output.split("\n").map(l => l.trim()).find(l => /^[a-zA-Z0-9_-]{11}$/.test(l));
 
-        if (!videoId) throw new Error(`yt-dlp no encontró resultados para: ${rawQuery}`);
+        if (!videoId) throw new Error(`yt-dlp no encontrÃ³ resultados para: ${rawQuery}`);
         effectiveQuery = `https://www.youtube.com/watch?v=${videoId}`;
         console.log("[YT-DLP SEARCH] URL encontrada:", effectiveQuery);
       }
@@ -459,11 +470,15 @@ class MusicSystem {
         guild: interaction.guildId,
       });
 
-      await this.distube.play(context.voiceChannel, effectiveQuery, {
-        member: context.member,
-        textChannel: interaction.channel,
-        metadata: { requestedBy: interaction.user.id, analysis },
-      });
+      await withTimeout(
+        this.distube.play(context.voiceChannel, effectiveQuery, {
+          member: context.member,
+          textChannel: interaction.channel,
+          metadata: { requestedBy: interaction.user.id, analysis },
+        }),
+        45000,
+        "La reproduccion",
+      );
 
       await this.repository.appendAuditEvent({
         eventType: "command.play",
