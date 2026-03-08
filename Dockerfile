@@ -2,7 +2,7 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg python3 make g++ pkgconfig
 
 COPY package*.json ./
 RUN npm install --omit=dev

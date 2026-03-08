@@ -21,6 +21,7 @@
     "distube": "^5.0.7",
     "dotenv": "^17.2.2",
     "express": "^4.21.2",
+    "libsodium-wrappers": "^0.7.15",
     "opusscript": "^0.1.1",
     "pg": "^8.13.3"
   }

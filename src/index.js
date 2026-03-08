@@ -13,13 +13,31 @@ const { createApiServer } = require("./api/server");
 
 async function main() {
   const logger = createLogger("titan");
+
+  // â”€â”€ Registrar cifrado de voz ANTES de cualquier conexion â”€â”€
+  try {
+    const sodium = require("libsodium-wrappers");
+    await sodium.ready;
+    const { generateDependencyReport } = require("@discordjs/voice");
+    logger.info("Cifrado de voz listo (libsodium).");
+    logger.info("Voice dependency report:\n" + generateDependencyReport());
+  } catch (err) {
+    logger.error("No se pudo cargar libsodium-wrappers. La conexion de voz probablemente fallara.", {
+      error: err.message,
+    });
+  }
+
   const eventBus = new EventBus();
   const repository = createRepository(config, logger.child("repository"), eventBus);
   await repository.initialize();
   const cache = new TtlCache();
   const cloudClients = createCloudClients(config, logger.child("cloud"));
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.GuildMessages,
+    ],
   });
 
   const settingsService = new SettingsService({
