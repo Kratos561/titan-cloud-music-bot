@@ -1,5 +1,6 @@
 const { EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { DisTube, RepeatMode } = require("distube");
+const { YouTubePlugin } = require("@distube/youtube");
 const { YtDlpPlugin } = require("@distube/yt-dlp");
 
 function truncate(text, maxLength = 1800) {
@@ -94,11 +95,17 @@ class MusicSystem {
     this.sessions = new Map();
     this.snapshotCatalog = new Map();
 
+    // YouTubePlugin: maneja búsquedas de texto y URLs de YouTube
+    const youtubePlugin = config.audio.youtubeCookies
+      ? new YouTubePlugin({ cookies: config.audio.youtubeCookies })
+      : new YouTubePlugin();
+
+    // YtDlpPlugin: maneja URLs directas de otros sitios (debe ir último)
     const ytDlpOptions = {
-      update: false, // yt-dlp is installed via pip in Dockerfile, no need to download
+      update: false, // yt-dlp instalado via pip en Dockerfile
     };
 
-    // Convertir cookies JSON a formato Netscape (cookies.txt) para yt-dlp
+    // Convertir cookies JSON a formato Netscape para yt-dlp
     if (config.audio.youtubeCookies && Array.isArray(config.audio.youtubeCookies)) {
       const fs = require("node:fs");
       const path = require("node:path");
@@ -115,12 +122,12 @@ class MusicSystem {
       }
 
       fs.writeFileSync(cookiesTxtPath, lines.join("\n"), "utf8");
-      logger.info(`Cookies de YouTube escritas en formato Netscape (${config.audio.youtubeCookies.length} cookies).`);
+      logger.info(`Cookies de YouTube escritas (${config.audio.youtubeCookies.length} cookies).`);
       ytDlpOptions.flags = ["--cookies", cookiesTxtPath];
     }
 
     this.distube = new DisTube(client, {
-      plugins: [new YtDlpPlugin(ytDlpOptions)],
+      plugins: [youtubePlugin, new YtDlpPlugin(ytDlpOptions)], // yt-dlp DEBE ir último
       emitNewSongOnly: true,
       savePreviousSongs: true,
     });
