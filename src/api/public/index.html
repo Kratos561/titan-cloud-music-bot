@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Titan Cloud Music Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Titan Cloud Music</p>
+          <h1>Panel operativo del sistema</h1>
+          <p class="subtle">
+            Salud del bot, sesiones activas, eventos en vivo y configuracion por guild.
+          </p>
+        </div>
+        <div class="card">
+          <label>Admin token</label>
+          <input id="adminToken" type="password" placeholder="x-admin-token opcional" />
+        </div>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <h2>Estado del sistema</h2>
+          <div id="healthGrid" class="stats"></div>
+        </article>
+        <article class="card">
+          <h2>Guild settings</h2>
+          <form id="settingsForm">
+            <label>Guild ID</label>
+            <input id="guildId" placeholder="123456789012345678" required />
+            <label>Default volume</label>
+            <input id="defaultVolume" type="number" min="1" max="200" placeholder="80" />
+            <label>DJ role ID</label>
+            <input id="djRoleId" placeholder="Rol DJ opcional" />
+            <label>Command channel ID</label>
+            <input id="commandChannelId" placeholder="Canal permitido opcional" />
+            <button type="submit">Guardar settings</button>
+          </form>
+          <pre id="settingsResult" class="result"></pre>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <h2>Sesiones activas</h2>
+          <div id="sessions"></div>
+        </article>
+        <article class="card">
+          <h2>Eventos en vivo</h2>
+          <div id="events" class="events"></div>
+        </article>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
