@@ -129,12 +129,7 @@ class StableYtDlpPlugin extends ExtractorPlugin {
   }
 
   get baseArgs() {
-    const args = [
-      "--no-warnings",
-      "--no-check-certificate",
-      "--extractor-args",
-      "youtube:player_client=android,web",
-    ];
+    const args = ["--no-warnings", "--no-check-certificate"];
 
     if (this.cookieFilePath) {
       args.push("--cookies", this.cookieFilePath);
@@ -240,15 +235,38 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       return song.stream.url;
     }
 
-    const streamUrl = parseStreamUrlFromOutput(
-      this.runYtDlp(
-        ["-f", "bestaudio[acodec!=none]/bestaudio/best", "--get-url", song.url],
-        45000,
-      ).combined,
-    );
+    const selectors = song.isLive
+      ? ["b/best"]
+      : [
+          "ba[ext=webm]/ba[ext=m4a]/ba",
+          "b[acodec!=none]/best[acodec!=none]",
+          "b/best",
+        ];
+
+    let streamUrl = null;
+    let lastError = null;
+
+    for (const selector of selectors) {
+      try {
+        streamUrl = parseStreamUrlFromOutput(
+          this.runYtDlp(["-f", selector, "--get-url", song.url], 45000).combined,
+        );
+
+        if (streamUrl) {
+          break;
+        }
+      } catch (error) {
+        lastError = error;
+        this.logger?.warn("Selector de formato no disponible; probando fallback.", {
+          songId: song.id,
+          selector,
+          error: error.message,
+        });
+      }
+    }
 
     if (!streamUrl) {
-      throw new Error(`yt-dlp no devolvio un stream valido para ${song.url}`);
+      throw lastError ?? new Error(`yt-dlp no devolvio un stream valido para ${song.url}`);
     }
 
     if (song.stream.playFromSource) {
