@@ -1,0 +1,67 @@
+[
+    {
+        "name": "SID",
+        "value": "g.a0007Ag5EvYoHd_7mikYzSqGamnGXGygyg0W9UN7_SVVspv0Y6OzbYJ7vYsiFwCA8Z6B_QMm4gACgYKAagSARESFQHGX2MihWAQFlNXnUBuo78JBpVMERoVAUF8yKr-xYE6aXVBXJECNBLepdZ-0076",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "HSID",
+        "value": "AphlFCAMJlMV7D181",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "SSID",
+        "value": "APsTaW39hDvnpxuin",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "APISID",
+        "value": "8e2imZjRyx8isARJ/AkPdGpkABAI2H-KQT",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "SAPISID",
+        "value": "dEcChjC8lg-gXEzE/AHsIPXlZpI0zVz40i",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "__Secure-1PSID",
+        "value": "g.a0007Ag5EvYoHd_7mikYzSqGamnGXGygyg0W9UN7_SVVspv0Y6Oz8gjLh0x1vBShisIh-YQCcgACgYKARsSARESFQHGX2Mi8anhYXVvHRwgjAnGNyvvaxoVAUF8yKrMotMHXW7g7ioYOwl6PU-l0076",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "__Secure-3PSID",
+        "value": "g.a0007Ag5EvYoHd_7mikYzSqGamnGXGygyg0W9UN7_SVVspv0Y6OzzfiqnZXD10SE-Cjzxtme7gACgYKAdMSARESFQHGX2Mi8bmmNFmOhW8paL6HPpdxaxoVAUF8yKqNAaSdV7ccBN6JLAC5LtqX0076",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "__Secure-1PAPISID",
+        "value": "dEcChjC8lg-gXEzE/AHsIPXlZpI0zVz40i",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "__Secure-3PAPISID",
+        "value": "dEcChjC8lg-gXEzE/AHsIPXlZpI0zVz40i",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "LOGIN_INFO",
+        "value": "AFmmF2swRgIhAP4u2PygYRjaB5U5yEuW96NgTSNRP0e2YPe7OQqGaQe-AiEA4jxBIcFQiPn2NPTMyk1VKHVSk2E39j1tyqsI4WG4bD0:QUQ3MjNmd0Q1RVphc3ZPNkZNNExxR0RyWWhIc3N2elkySVFFZC1uMTMxVjF5RWNwa2tiV05VN1NkNkR1VW5PMFEwRVczZ2pLSHBnV01aSUlwV3Z3MEtfNXlqUnhwczFQcHhQbTVWODkwNml2dUZMSVNWd2ZOa2tTQmxQa055SzBHYi1CVnFMMWZROEQyYmlTVll5dWVHTXRyWEs0T205bnpn",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "PREF",
+        "value": "f4=4000000&tz=America.La_Paz",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "__Secure-1PSIDTS",
+        "value": "sidts-CjQB7I_69ED6IzLR2F4qCgaNpLEky_guc74Hz2ZXVxLg0_KDZGtsH5aR-ddakV0E0y8bC4ujEAA",
+        "domain": ".youtube.com"
+    },
+    {
+        "name": "__Secure-3PSIDTS",
+        "value": "sidts-CjQB7I_69ED6IzLR2F4qCgaNpLEky_guc74Hz2ZXVxLg0_KDZGtsH5aR-ddakV0E0y8bC4ujEAA",
+        "domain": ".youtube.com"
+    }
+]

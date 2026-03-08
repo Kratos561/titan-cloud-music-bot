@@ -36,6 +36,20 @@ function integerEnv(name, fallback) {
 }
 
 function readYouTubeCookies() {
+  // Opción 1: Cookies directas como JSON string en variable de entorno
+  const cookiesJson = optionalEnv("YOUTUBE_COOKIES");
+  if (cookiesJson) {
+    try {
+      const parsed = JSON.parse(cookiesJson);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      throw new Error("YOUTUBE_COOKIES debe contener un JSON array válido de cookies.");
+    }
+  }
+
+  // Opción 2: Cookies desde un archivo
   const configuredPath = optionalEnv("YOUTUBE_COOKIES_FILE");
 
   if (!configuredPath) {
