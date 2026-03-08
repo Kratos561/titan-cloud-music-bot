@@ -1,6 +1,6 @@
 const { EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { DisTube, RepeatMode } = require("distube");
-const { YouTubePlugin } = require("@distube/youtube");
+const { YtDlpPlugin } = require("@distube/yt-dlp");
 
 function truncate(text, maxLength = 1800) {
   if (!text) {
@@ -94,12 +94,31 @@ class MusicSystem {
     this.sessions = new Map();
     this.snapshotCatalog = new Map();
 
-    const youtubePlugin = config.audio.youtubeCookies
-      ? new YouTubePlugin({ cookies: config.audio.youtubeCookies })
-      : new YouTubePlugin();
+    const ytDlpOptions = {};
+
+    // Convertir cookies JSON a formato Netscape (cookies.txt) para yt-dlp
+    if (config.audio.youtubeCookies && Array.isArray(config.audio.youtubeCookies)) {
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const cookiesTxtPath = path.resolve(process.cwd(), "cookies.txt");
+
+      const lines = ["# Netscape HTTP Cookie File"];
+      for (const c of config.audio.youtubeCookies) {
+        const domain = c.domain || ".youtube.com";
+        const flag = domain.startsWith(".") ? "TRUE" : "FALSE";
+        const cookiePath = c.path || "/";
+        const secure = c.secure ? "TRUE" : (c.name?.startsWith("__Secure") ? "TRUE" : "FALSE");
+        const expiry = c.expirationDate ? Math.floor(c.expirationDate) : "0";
+        lines.push(`${domain}\t${flag}\t${cookiePath}\t${secure}\t${expiry}\t${c.name}\t${c.value}`);
+      }
+
+      fs.writeFileSync(cookiesTxtPath, lines.join("\n"), "utf8");
+      logger.info(`Cookies de YouTube escritas en formato Netscape (${config.audio.youtubeCookies.length} cookies).`);
+      ytDlpOptions.flags = ["--cookies", cookiesTxtPath];
+    }
 
     this.distube = new DisTube(client, {
-      plugins: [youtubePlugin],
+      plugins: [new YtDlpPlugin(ytDlpOptions)],
       emitNewSongOnly: true,
       savePreviousSongs: true,
     });
