@@ -10,6 +10,23 @@ function truncate(text, maxLength = 1800) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
+function formatMissingPermissions(missingPermissions) {
+  return missingPermissions
+    .map((permission) => {
+      switch (permission) {
+        case PermissionFlagsBits.ViewChannel:
+          return "ViewChannel";
+        case PermissionFlagsBits.Connect:
+          return "Connect";
+        case PermissionFlagsBits.Speak:
+          return "Speak";
+        default:
+          return permission.toString();
+      }
+    })
+    .join(", ");
+}
+
 function formatLoopMode(mode) {
   if (mode === RepeatMode.SONG) {
     return "Cancion";
@@ -209,6 +226,9 @@ class MusicSystem {
         });
 
         queue?.textChannel?.send(`Error reproduciendo musica: ${truncate(error.message)}`);
+      })
+      .on("debug", (message) => {
+        this.logger.info("DisTube debug.", { message });
       });
   }
 
@@ -307,8 +327,26 @@ class MusicSystem {
       return null;
     }
 
+    const botMember = await this.getBotMember(interaction);
+    const botPermissions = voiceChannel.permissionsFor(botMember);
+    const requiredPermissions = [
+      PermissionFlagsBits.ViewChannel,
+      PermissionFlagsBits.Connect,
+      PermissionFlagsBits.Speak,
+    ];
+    const missingPermissions = requiredPermissions.filter((permission) => !botPermissions?.has(permission));
+
+    if (missingPermissions.length) {
+      await reply(interaction, {
+        content: `No puedo entrar a <#${voiceChannel.id}> porque me faltan permisos: ${formatMissingPermissions(
+          missingPermissions,
+        )}.`,
+        ephemeral: true,
+      });
+      return null;
+    }
+
     if (options.requireSameVoiceChannel) {
-      const botMember = await this.getBotMember(interaction);
       const botChannel = botMember.voice?.channel;
 
       if (botChannel && botChannel.id !== voiceChannel.id) {
