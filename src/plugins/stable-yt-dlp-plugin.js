@@ -159,10 +159,12 @@ function writeCookieFile(cookies) {
 }
 
 class StableYtDlpPlugin extends ExtractorPlugin {
-  constructor({ cookies, logger, ytdlpPath = "yt-dlp" } = {}) {
+  constructor({ cookies, logger, ytdlpPath = "yt-dlp", poTokenGvs = null, poTokenPlayer = null } = {}) {
     super();
     this.logger = logger;
     this.ytdlpPath = ytdlpPath;
+    this.poTokenGvs = poTokenGvs;
+    this.poTokenPlayer = poTokenPlayer;
     this.cookieFilePath = Array.isArray(cookies) && cookies.length ? writeCookieFile(cookies) : null;
 
     if (this.cookieFilePath) {
@@ -182,8 +184,56 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     return args;
   }
 
-  runYtDlp(args, timeoutMs = 45000) {
-    const result = spawnSync(this.ytdlpPath, [...this.baseArgs, ...args], {
+  get streamBaseArgs() {
+    return this.buildExtractorArgs({
+      playerClient: "tv,tv_simply,android_sdkless,ios,-web,-web_safari,-web_creator,-mweb",
+      includeMissingPoFormats: true,
+    });
+  }
+
+  buildExtractorArgs({ playerClient, includeMissingPoFormats = false, poTokenClient = null } = {}) {
+    const pieces = [];
+
+    if (playerClient) {
+      pieces.push(`player_client=${playerClient}`);
+    }
+
+    if (includeMissingPoFormats) {
+      pieces.push("formats=missing_pot");
+    }
+
+    const poTokens = [];
+    if (poTokenClient && this.poTokenGvs) {
+      poTokens.push(`${poTokenClient}.gvs+${this.poTokenGvs}`);
+    }
+    if (poTokenClient && this.poTokenPlayer) {
+      poTokens.push(`${poTokenClient}.player+${this.poTokenPlayer}`);
+    }
+    if (poTokens.length) {
+      pieces.push(`po_token=${poTokens.join(",")}`);
+    }
+
+    const args = ["--no-warnings", "--no-check-certificate"];
+    if (pieces.length) {
+      args.push("--extractor-args", `youtube:${pieces.join(";")}`);
+    }
+
+    return args;
+  }
+
+  runYtDlp(args, timeoutMs = 45000, options = {}) {
+    const baseArgs = options.customBaseArgs ?? (options.streamMode ? this.streamBaseArgs : this.baseArgs);
+    const finalArgs = [...baseArgs];
+
+    if (options.includeCookies !== false && !options.streamMode && this.cookieFilePath && !finalArgs.includes("--cookies")) {
+      finalArgs.push("--cookies", this.cookieFilePath);
+    }
+
+    if (options.includeCookies && options.streamMode && this.cookieFilePath && !finalArgs.includes("--cookies")) {
+      finalArgs.push("--cookies", this.cookieFilePath);
+    }
+
+    const result = spawnSync(this.ytdlpPath, [...finalArgs, ...args], {
       encoding: "utf8",
       timeout: timeoutMs,
       maxBuffer: 20 * 1024 * 1024,
@@ -204,7 +254,7 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     return { combined };
   }
 
-  downloadToTempFile(song, selector = null) {
+  downloadToTempFile(song, selector = null, options = {}) {
     const cacheDir = path.join(os.tmpdir(), "titan-ytdlp-cache");
     fs.mkdirSync(cacheDir, { recursive: true });
     cleanupCacheDir(cacheDir);
@@ -219,7 +269,7 @@ class StableYtDlpPlugin extends ExtractorPlugin {
 
     args.push(song.url);
 
-    const filePath = parseFilePathFromOutput(this.runYtDlp(args, 120000).combined);
+    const filePath = parseFilePathFromOutput(this.runYtDlp(args, 120000, options).combined);
     if (!filePath) {
       throw new Error(`yt-dlp no devolvio un archivo reproducible para ${song.url}`);
     }
@@ -312,23 +362,61 @@ class StableYtDlpPlugin extends ExtractorPlugin {
 
     let streamUrl = null;
     let lastError = null;
+    const streamModes = [
+      {
+        label: "stream-safari-hls",
+        options: {
+          streamMode: true,
+          includeCookies: false,
+          customBaseArgs: this.buildExtractorArgs({
+            playerClient: "web_safari,-web,-web_creator,-mweb",
+            includeMissingPoFormats: true,
+          }),
+        },
+      },
+      { label: "stream-no-cookies", options: { streamMode: true, includeCookies: false } },
+      { label: "stream-with-cookies", options: { streamMode: true, includeCookies: true } },
+      { label: "default-with-cookies", options: { streamMode: false, includeCookies: true } },
+    ];
 
-    for (const selector of selectors) {
-      try {
-        streamUrl = parseStreamUrlFromOutput(
-          this.runYtDlp(["-f", selector, "--get-url", song.url], 45000).combined,
-        );
+    if (this.poTokenGvs || this.poTokenPlayer) {
+      streamModes.unshift({
+        label: "stream-po-token-mweb",
+        options: {
+          streamMode: true,
+          includeCookies: true,
+          customBaseArgs: this.buildExtractorArgs({
+            playerClient: "mweb,default,-web,-web_creator",
+            includeMissingPoFormats: true,
+            poTokenClient: "mweb",
+          }),
+        },
+      });
+    }
 
-        if (streamUrl) {
-          break;
+    for (const mode of streamModes) {
+      for (const selector of selectors) {
+        try {
+          streamUrl = parseStreamUrlFromOutput(
+            this.runYtDlp(["-f", selector, "--get-url", song.url], 45000, mode.options).combined,
+          );
+
+          if (streamUrl) {
+            break;
+          }
+        } catch (error) {
+          lastError = error;
+          this.logger?.warn("Selector de formato no disponible; probando fallback.", {
+            songId: song.id,
+            mode: mode.label,
+            selector,
+            error: error.message,
+          });
         }
-      } catch (error) {
-        lastError = error;
-        this.logger?.warn("Selector de formato no disponible; probando fallback.", {
-          songId: song.id,
-          selector,
-          error: error.message,
-        });
+      }
+
+      if (streamUrl) {
+        break;
       }
     }
 
@@ -336,24 +424,63 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       const downloadSelectors = song.isLive
         ? ["b/best", null]
         : ["ba/b", "b/best", null];
+      const downloadModes = [
+        {
+          label: "download-safari-hls",
+          options: {
+            streamMode: true,
+            includeCookies: false,
+            customBaseArgs: this.buildExtractorArgs({
+              playerClient: "web_safari,-web,-web_creator,-mweb",
+              includeMissingPoFormats: true,
+            }),
+          },
+        },
+        { label: "download-no-cookies", options: { streamMode: true, includeCookies: false } },
+        { label: "download-with-cookies", options: { streamMode: true, includeCookies: true } },
+        { label: "download-default", options: { streamMode: false, includeCookies: true } },
+      ];
 
-      for (const selector of downloadSelectors) {
-        try {
-          const filePath = this.downloadToTempFile(song, selector);
-          this.logger?.warn("Usando fallback por descarga temporal para reproducir.", {
-            songId: song.id,
-            selector: selector ?? "default",
-            filePath,
-          });
-          streamUrl = filePath;
+      if (this.poTokenGvs || this.poTokenPlayer) {
+        downloadModes.unshift({
+          label: "download-po-token-mweb",
+          options: {
+            streamMode: true,
+            includeCookies: true,
+            customBaseArgs: this.buildExtractorArgs({
+              playerClient: "mweb,default,-web,-web_creator",
+              includeMissingPoFormats: true,
+              poTokenClient: "mweb",
+            }),
+          },
+        });
+      }
+
+      for (const mode of downloadModes) {
+        for (const selector of downloadSelectors) {
+          try {
+            const filePath = this.downloadToTempFile(song, selector, mode.options);
+            this.logger?.warn("Usando fallback por descarga temporal para reproducir.", {
+              songId: song.id,
+              mode: mode.label,
+              selector: selector ?? "default",
+              filePath,
+            });
+            streamUrl = filePath;
+            break;
+          } catch (error) {
+            lastError = error;
+            this.logger?.warn("Fallback por descarga temporal no disponible; probando siguiente.", {
+              songId: song.id,
+              mode: mode.label,
+              selector: selector ?? "default",
+              error: error.message,
+            });
+          }
+        }
+
+        if (streamUrl) {
           break;
-        } catch (error) {
-          lastError = error;
-          this.logger?.warn("Fallback por descarga temporal no disponible; probando siguiente.", {
-            songId: song.id,
-            selector: selector ?? "default",
-            error: error.message,
-          });
         }
       }
     }
