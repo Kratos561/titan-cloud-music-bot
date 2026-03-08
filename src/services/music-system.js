@@ -412,31 +412,52 @@ class MusicSystem {
 
     await interaction.deferReply();
 
-    await this.distube.play(context.voiceChannel, effectiveQuery, {
-      member: context.member,
-      textChannel: interaction.channel,
-      metadata: {
-        requestedBy: interaction.user.id,
-        analysis,
-      },
-    });
+    try {
+      this.logger.info("Intentando reproducir.", {
+        query: effectiveQuery,
+        voiceChannel: context.voiceChannel.id,
+        guild: interaction.guildId,
+      });
 
-    await this.repository.appendAuditEvent({
-      eventType: "command.play",
-      guildId: interaction.guildId,
-      userId: interaction.user.id,
-      payload: {
-        rawQuery,
-        effectiveQuery,
-        cached: Boolean(cached),
-      },
-    });
+      await this.distube.play(context.voiceChannel, effectiveQuery, {
+        member: context.member,
+        textChannel: interaction.channel,
+        metadata: {
+          requestedBy: interaction.user.id,
+          analysis,
+        },
+      });
 
-    await interaction.editReply(
-      cached
-        ? `Usando cache inteligente para: **${rawQuery}**`
-        : `Buscando en YouTube: **${rawQuery}**`,
-    );
+      await this.repository.appendAuditEvent({
+        eventType: "command.play",
+        guildId: interaction.guildId,
+        userId: interaction.user.id,
+        payload: {
+          rawQuery,
+          effectiveQuery,
+          cached: Boolean(cached),
+        },
+      });
+
+      await interaction.editReply(
+        cached
+          ? `Usando cache inteligente para: **${rawQuery}**`
+          : `Buscando en YouTube: **${rawQuery}**`,
+      );
+    } catch (playError) {
+      this.logger.error("Error en distube.play().", {
+        error: playError.message,
+        code: playError.code,
+        errorName: playError.name,
+        stack: playError.stack?.split("\n").slice(0, 5).join("\n"),
+      });
+
+      const userMessage = playError.message?.includes("30 seconds")
+        ? "No pude conectar al canal de voz en 30 segundos. Error interno: " + playError.message
+        : `Error al reproducir: ${playError.message}`;
+
+      await interaction.editReply(userMessage).catch(() => { });
+    }
   }
 
   async handleQueue(interaction) {

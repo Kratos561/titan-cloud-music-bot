@@ -14,24 +14,49 @@ const { createApiServer } = require("./api/server");
 async function main() {
   const logger = createLogger("titan");
 
-  // ── Registrar cifrado de voz ANTES de cualquier conexion ──
+  // ── PASO 1: Cargar TODAS las dependencias de voz ANTES del cliente ──
   try {
+    // 1a. Cargar sodium para cifrado de voz
     const sodium = require("libsodium-wrappers");
     await sodium.ready;
-    const { generateDependencyReport } = require("@discordjs/voice");
     logger.info("Cifrado de voz listo (libsodium).");
-    logger.info("Voice dependency report:\n" + generateDependencyReport());
   } catch (err) {
-    logger.error("No se pudo cargar libsodium-wrappers. La conexion de voz probablemente fallara.", {
+    logger.error("No se pudo cargar libsodium-wrappers.", { error: err.message });
+  }
+
+  try {
+    // 1b. Cargar DAVE (Discord Audio Visual Encryption) - OBLIGATORIO desde 2025
+    require("@snazzah/davey");
+    logger.info("DAVE protocol library loaded.");
+  } catch (err) {
+    logger.error("No se pudo cargar @snazzah/davey (DAVE). Conexiones de voz pueden fallar.", {
       error: err.message,
     });
   }
+
+  try {
+    // 1c. Verificar que las dependencias de voz estan completas
+    const { generateDependencyReport } = require("@discordjs/voice");
+    logger.info("Voice dependency report:\n" + generateDependencyReport());
+  } catch (err) {
+    logger.error("Error al generar reporte de dependencias de voz.", { error: err.message });
+  }
+
+  // ── Evitar que errores no manejados maten el proceso ──
+  process.on("unhandledRejection", (error) => {
+    logger.error("Unhandled promise rejection.", { error: error?.message ?? String(error) });
+  });
+
+  process.on("uncaughtException", (error) => {
+    logger.error("Uncaught exception.", { error: error?.message ?? String(error) });
+  });
 
   const eventBus = new EventBus();
   const repository = createRepository(config, logger.child("repository"), eventBus);
   await repository.initialize();
   const cache = new TtlCache();
   const cloudClients = createCloudClients(config, logger.child("cloud"));
+
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -83,13 +108,16 @@ async function main() {
     }),
   );
 
-  // Evitar que errores no manejados maten el proceso
+  // Evitar que errores no manejados en el client maten el proceso
   client.on("error", (error) => {
     logger.error("Discord client error.", { error: error.message });
   });
 
-  process.on("unhandledRejection", (error) => {
-    logger.error("Unhandled promise rejection.", { error: error?.message ?? String(error) });
+  // Debug logging para diagnosticar problemas de voz
+  client.on("debug", (message) => {
+    if (message.toLowerCase().includes("voice") || message.includes("4014") || message.includes("4017")) {
+      logger.info("Discord debug (voice):", { message });
+    }
   });
 
   const apiServer = createApiServer({
