@@ -430,18 +430,36 @@ class MusicSystem {
     const rawQuery = interaction.options.getString("busqueda", true);
     const analysis = this.queryIntelligence.analyze(rawQuery);
     const cached = this.queryIntelligence.getCachedResolution(analysis.normalized);
-
-    // Si el query es texto plano (no URL), usar ytsearch: para que yt-dlp maneje
-    // tanto la búsqueda como el stream (más robusto en IPs de datacenter)
     const isUrl = /^https?:\/\//i.test(rawQuery);
-    const baseQuery = cached?.url ?? rawQuery;
-    const effectiveQuery = (isUrl || cached?.url) ? baseQuery : `ytsearch:${baseQuery}`;
 
     await interaction.deferReply();
 
     try {
+      // Resolver la URL efectiva
+      let effectiveQuery = cached?.url ?? rawQuery;
+
+      // Si es texto plano (no URL ni cache), usamos yt-dlp binary para buscar en YouTube
+      // y obtener una URL directa — esto evita el fallo de stream de @distube/youtube en datacenter IPs
+      if (!isUrl && !cached?.url) {
+        const { execFileSync } = require("node:child_process");
+        const path = require("node:path");
+        const fs = require("node:fs");
+
+        const cookiesPath = path.resolve(process.cwd(), "cookies.txt");
+        const args = ["--get-id", "--no-playlist", "--no-warnings", "-q", `ytsearch1:${rawQuery}`];
+        if (fs.existsSync(cookiesPath)) args.push("--cookies", cookiesPath);
+
+        console.log("[YT-DLP SEARCH] Buscando:", rawQuery);
+        const videoId = execFileSync("yt-dlp", args, { encoding: "utf8", timeout: 25000 }).trim();
+
+        if (!videoId) throw new Error(`yt-dlp no encontró resultados para: ${rawQuery}`);
+        effectiveQuery = `https://www.youtube.com/watch?v=${videoId}`;
+        console.log("[YT-DLP SEARCH] URL encontrada:", effectiveQuery);
+      }
+
       this.logger.info("Intentando reproducir.", {
-        query: effectiveQuery,
+        rawQuery,
+        effectiveQuery,
         voiceChannel: context.voiceChannel.id,
         guild: interaction.guildId,
       });
@@ -449,43 +467,26 @@ class MusicSystem {
       await this.distube.play(context.voiceChannel, effectiveQuery, {
         member: context.member,
         textChannel: interaction.channel,
-        metadata: {
-          requestedBy: interaction.user.id,
-          analysis,
-        },
+        metadata: { requestedBy: interaction.user.id, analysis },
       });
 
       await this.repository.appendAuditEvent({
         eventType: "command.play",
         guildId: interaction.guildId,
         userId: interaction.user.id,
-        payload: {
-          rawQuery,
-          effectiveQuery,
-          cached: Boolean(cached),
-        },
+        payload: { rawQuery, effectiveQuery, cached: Boolean(cached) },
       });
 
       await interaction.editReply(
-        cached
-          ? `Usando cache inteligente para: **${rawQuery}**`
-          : `Buscando en YouTube: **${rawQuery}**`,
+        cached ? `Usando cache: **${rawQuery}**` : `Reproduciendo: **${rawQuery}**`,
       );
     } catch (playError) {
-      // Log completo para diagnostico en Railway
-      console.error("=== ERROR DISTUBE.PLAY ===");
+      console.error("=== ERROR PLAY ===");
       console.error("Mensaje:", playError.message);
-      console.error("Nombre:", playError.name);
-      console.error("Codigo:", playError.code);
       console.error("Stack:", playError.stack);
-      if (playError.cause) console.error("Causa:", playError.cause);
-      console.error("=========================");
+      console.error("==================");
 
-      const userMessage = playError.message?.includes("30 seconds")
-        ? "No pude conectar al canal de voz en 30 segundos. Error interno: " + playError.message
-        : `Error al reproducir: ${playError.message}`;
-
-      await interaction.editReply(userMessage).catch(() => { });
+      await interaction.editReply(`Error al reproducir: ${playError.message}`).catch(() => { });
     }
   }
 
