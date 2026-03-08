@@ -439,18 +439,28 @@ class MusicSystem {
       let effectiveQuery = cached?.url ?? rawQuery;
 
       // Si es texto plano (no URL ni cache), usamos yt-dlp binary para buscar en YouTube
-      // y obtener una URL directa — esto evita el fallo de stream de @distube/youtube en datacenter IPs
+      // y obtener una URL directa — esto evita el fallo de stream en IPs de datacenter
       if (!isUrl && !cached?.url) {
         const { execFileSync } = require("node:child_process");
-        const path = require("node:path");
-        const fs = require("node:fs");
 
-        const cookiesPath = path.resolve(process.cwd(), "cookies.txt");
-        const args = ["--get-id", "--no-playlist", "--no-warnings", "-q", `ytsearch1:${rawQuery}`];
-        if (fs.existsSync(cookiesPath)) args.push("--cookies", cookiesPath);
+        // Usar --print en vez del deprecado --get-id
+        // NO usamos cookies aqui: las cookies de browser causan conflicto en IPs de datacenter
+        const args = [
+          "--print", "%(id)s",
+          "--no-playlist",
+          "--no-warnings",
+          "--no-check-certificate",
+          `ytsearch1:${rawQuery}`,
+        ];
 
         console.log("[YT-DLP SEARCH] Buscando:", rawQuery);
-        const videoId = execFileSync("yt-dlp", args, { encoding: "utf8", timeout: 25000 }).trim();
+        const output = execFileSync("yt-dlp", args, {
+          encoding: "utf8",
+          timeout: 30000,
+        }).trim();
+
+        // El output puede tener multiples lineas, tomamos la primera que sea un ID valido
+        const videoId = output.split("\n").map(l => l.trim()).find(l => /^[a-zA-Z0-9_-]{11}$/.test(l));
 
         if (!videoId) throw new Error(`yt-dlp no encontró resultados para: ${rawQuery}`);
         effectiveQuery = `https://www.youtube.com/watch?v=${videoId}`;
