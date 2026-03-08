@@ -1,5 +1,24 @@
 const { reply } = require("../services/music-system");
 
+function formatInteractionError(error) {
+  if (!error?.message) {
+    return "Ocurrio un error interno.";
+  }
+
+  if (error.message.includes("Cannot connect to the voice channel after 30 seconds")) {
+    return (
+      "No pude completar la conexion de voz con Discord en 30 segundos. " +
+      "Si el bot ya tiene permisos `ViewChannel`, `Connect` y `Speak` en ese canal, entonces el problema es del hosting/red del servidor donde esta corriendo el bot."
+    );
+  }
+
+  if (error.message.includes("I do not have permission to join this voice channel")) {
+    return "No tengo permisos para entrar o hablar en ese canal de voz.";
+  }
+
+  return error.message;
+}
+
 function createInteractionHandler({ musicSystem, logger }) {
   return async function onInteraction(interaction) {
     if (!interaction.isChatInputCommand() || !interaction.inGuild()) {
@@ -72,7 +91,7 @@ function createInteractionHandler({ musicSystem, logger }) {
       });
 
       await reply(interaction, {
-        content: `No pude completar el comando: ${error.message}`,
+        content: `No pude completar el comando: ${formatInteractionError(error)}`,
         ephemeral: true,
       });
     }
