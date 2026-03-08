@@ -77,6 +77,50 @@ function parseStreamUrlFromOutput(text) {
   return lines.find((line) => /^https?:\/\//i.test(line)) ?? null;
 }
 
+function parseFilePathFromOutput(text) {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const candidate = lines[index].replace(/^filepath:/i, "").trim();
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function sanitizeFilePart(value) {
+  return String(value ?? "track")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || "track";
+}
+
+function cleanupCacheDir(cacheDir, maxAgeMs = 6 * 60 * 60 * 1000) {
+  if (!fs.existsSync(cacheDir)) {
+    return;
+  }
+
+  const cutoff = Date.now() - maxAgeMs;
+  for (const entry of fs.readdirSync(cacheDir)) {
+    const filePath = path.join(cacheDir, entry);
+
+    try {
+      const stats = fs.statSync(filePath);
+      if (stats.isFile() && stats.mtimeMs < cutoff) {
+        fs.unlinkSync(filePath);
+      }
+    } catch {
+      // Ignore cache cleanup errors; they should not block playback.
+    }
+  }
+}
+
 function toNetscapeCookieLine(cookie) {
   const domain = String(cookie.domain ?? "").trim();
   const pathValue = String(cookie.path ?? "/").trim() || "/";
@@ -158,6 +202,29 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     }
 
     return { combined };
+  }
+
+  downloadToTempFile(song, selector = null) {
+    const cacheDir = path.join(os.tmpdir(), "titan-ytdlp-cache");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    cleanupCacheDir(cacheDir);
+
+    const baseName = `${Date.now()}-${sanitizeFilePart(song.id)}-${sanitizeFilePart(song.name)}`;
+    const outputTemplate = path.join(cacheDir, `${baseName}.%(ext)s`);
+    const args = ["--ignore-config", "--print", "after_move:filepath", "-o", outputTemplate];
+
+    if (selector) {
+      args.push("-f", selector);
+    }
+
+    args.push(song.url);
+
+    const filePath = parseFilePathFromOutput(this.runYtDlp(args, 120000).combined);
+    if (!filePath) {
+      throw new Error(`yt-dlp no devolvio un archivo reproducible para ${song.url}`);
+    }
+
+    return filePath;
   }
 
   createSong(entry, options = {}, fallbackUrl = null) {
@@ -262,6 +329,32 @@ class StableYtDlpPlugin extends ExtractorPlugin {
           selector,
           error: error.message,
         });
+      }
+    }
+
+    if (!streamUrl) {
+      const downloadSelectors = song.isLive
+        ? ["b/best", null]
+        : ["ba/b", "b/best", null];
+
+      for (const selector of downloadSelectors) {
+        try {
+          const filePath = this.downloadToTempFile(song, selector);
+          this.logger?.warn("Usando fallback por descarga temporal para reproducir.", {
+            songId: song.id,
+            selector: selector ?? "default",
+            filePath,
+          });
+          streamUrl = filePath;
+          break;
+        } catch (error) {
+          lastError = error;
+          this.logger?.warn("Fallback por descarga temporal no disponible; probando siguiente.", {
+            songId: song.id,
+            selector: selector ?? "default",
+            error: error.message,
+          });
+        }
       }
     }
 
