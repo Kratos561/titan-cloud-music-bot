@@ -4,7 +4,22 @@ WORKDIR /app
 
 ENV YTDLP_BGUTIL_SCRIPT_PATH=/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js
 
-RUN apk add --no-cache ffmpeg python3 py3-pip make g++ pkgconfig libtool autoconf automake git
+RUN apk add --no-cache \
+  ffmpeg \
+  python3 \
+  py3-pip \
+  make \
+  g++ \
+  pkgconfig \
+  libtool \
+  autoconf \
+  automake \
+  git \
+  cairo-dev \
+  pango-dev \
+  jpeg-dev \
+  giflib-dev \
+  pixman-dev
 
 # Usar pre-releases/nightly porque YouTube rompe extractores con frecuencia.
 RUN pip3 install --break-system-packages --upgrade --pre --no-cache-dir "yt-dlp[default]" bgutil-ytdlp-pot-provider && yt-dlp --version
