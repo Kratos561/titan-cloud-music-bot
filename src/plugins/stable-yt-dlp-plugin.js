@@ -328,6 +328,9 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     this.pipedApiBases = splitConfiguredBases(process.env.PIPED_API_BASES, DEFAULT_PIPED_API_BASES);
     this.invidiousApiBases = splitConfiguredBases(process.env.INVIDIOUS_API_BASES, DEFAULT_INVIDIOUS_API_BASES);
     this.cookieFilePath = Array.isArray(cookies) && cookies.length ? writeCookieFile(cookies) : null;
+    this.bgutilScriptPath =
+      process.env.YTDLP_BGUTIL_SCRIPT_PATH?.trim() ||
+      "/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js";
     this.generatedPoTokenContext = null;
     this.generatedPoTokenPromise = null;
     this.generatedPoTokenExpiresAt = 0;
@@ -337,6 +340,12 @@ class StableYtDlpPlugin extends ExtractorPlugin {
         count: cookies.length,
       });
     }
+
+    if (this.bgutilScriptPath) {
+      this.logger?.info("Proveedor bgutil configurado.", {
+        scriptPath: this.bgutilScriptPath,
+      });
+    }
   }
 
   get baseArgs() {
@@ -344,6 +353,13 @@ class StableYtDlpPlugin extends ExtractorPlugin {
 
     if (this.cookieFilePath) {
       args.push("--cookies", this.cookieFilePath);
+    }
+
+    if (this.bgutilScriptPath) {
+      args.push(
+        "--extractor-args",
+        `youtubepot-bgutilscript:script_path=${this.bgutilScriptPath}`,
+      );
     }
 
     return args;
@@ -761,7 +777,7 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     }
 
     let generatedPoTokenContext = null;
-    if (!this.poTokenGvs && !this.poTokenPlayer) {
+    if (!this.poTokenGvs && !this.poTokenPlayer && !this.bgutilScriptPath) {
       try {
         generatedPoTokenContext = await this.getAutoPoTokenContext();
       } catch (error) {
@@ -877,12 +893,9 @@ class StableYtDlpPlugin extends ExtractorPlugin {
             break;
           } catch (error) {
             lastError = error;
-            this.logger?.warn("Fallback por descarga temporal no disponible; probando siguiente.", {
-              songId: song.id,
-              mode: mode.label,
-              selector: selector ?? "default",
-              error: error.message,
-            });
+            this.logger?.warn(
+              `Fallback por descarga temporal no disponible [${mode.label}/${selector ?? "default"}]: ${error.message}`,
+            );
           }
         }
 
@@ -905,12 +918,9 @@ class StableYtDlpPlugin extends ExtractorPlugin {
             }
           } catch (error) {
             lastError = error;
-            this.logger?.warn("Selector de formato no disponible; probando fallback.", {
-              songId: song.id,
-              mode: mode.label,
-              selector,
-              error: error.message,
-            });
+            this.logger?.warn(
+              `Selector de formato no disponible [${mode.label}/${selector}]: ${error.message}`,
+            );
           }
         }
 
@@ -935,12 +945,9 @@ class StableYtDlpPlugin extends ExtractorPlugin {
             break;
           } catch (error) {
             lastError = error;
-            this.logger?.warn("Fallback por descarga temporal no disponible; probando siguiente.", {
-              songId: song.id,
-              mode: mode.label,
-              selector: selector ?? "default",
-              error: error.message,
-            });
+            this.logger?.warn(
+              `Fallback por descarga temporal no disponible [${mode.label}/${selector ?? "default"}]: ${error.message}`,
+            );
           }
         }
 
@@ -955,10 +962,7 @@ class StableYtDlpPlugin extends ExtractorPlugin {
         streamUrl = await this.tryProxyFallback(song);
       } catch (error) {
         lastError = error;
-        this.logger?.warn("Fallback proxy no disponible.", {
-          songId: song.id,
-          error: error.message,
-        });
+        this.logger?.warn(`Fallback proxy no disponible: ${error.message}`);
       }
     }
 
