@@ -427,6 +427,7 @@ class MusicSystem {
     const cached = this.queryIntelligence.getCachedResolution(analysis.normalized);
 
     await interaction.deferReply();
+    await interaction.editReply("Buscando y preparando la reproduccion...");
 
     try {
       const effectiveQuery = cached?.url ?? rawQuery;
@@ -444,7 +445,7 @@ class MusicSystem {
           textChannel: interaction.channel,
           metadata: { requestedBy: interaction.user.id, analysis },
         }),
-        45000,
+        90000,
         "La reproduccion",
       );
 

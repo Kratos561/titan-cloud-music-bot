@@ -13,6 +13,10 @@ const DEFAULT_INVIDIOUS_API_BASES = [
   "https://yewtu.be",
   "https://invidious.nerdvpn.de",
 ];
+const DEFAULT_AUTO_PO_TOKEN_TTL_MS = 6 * 60 * 60 * 1000;
+const SEARCH_RESULT_LIMIT = 6;
+
+let poTokenGeneratorLoader = null;
 
 function toSafeInteger(value, fallback = 0) {
   const parsed = Number.parseInt(value, 10);
@@ -187,6 +191,88 @@ function cleanupCacheDir(cacheDir, maxAgeMs = 6 * 60 * 60 * 1000) {
   }
 }
 
+async function loadPoTokenGenerator() {
+  if (!poTokenGeneratorLoader) {
+    poTokenGeneratorLoader = import("youtube-po-token-generator").then((module) => {
+      const generate =
+        module.generate ??
+        module.default?.generate ??
+        module.default;
+
+      if (typeof generate !== "function") {
+        throw new Error("No pude cargar el generador automatico de PO Token.");
+      }
+
+      return generate;
+    });
+  }
+
+  return poTokenGeneratorLoader;
+}
+
+function normalizeComparableText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function scoreSearchEntry(entry, rawQuery) {
+  const query = normalizeComparableText(rawQuery);
+  const title = normalizeComparableText(entry?.title ?? entry?.fulltitle);
+  const uploader = normalizeComparableText(entry?.uploader ?? entry?.channel);
+  const terms = query.split(" ").filter((term) => term.length >= 3);
+
+  let score = 0;
+
+  if (!title) {
+    return score;
+  }
+
+  if (title === query) {
+    score += 250;
+  }
+
+  if (title.includes(query)) {
+    score += 120;
+  }
+
+  for (const term of terms) {
+    if (title.includes(term)) {
+      score += 18;
+    }
+
+    if (uploader.includes(term)) {
+      score += 6;
+    }
+  }
+
+  if (/(official|topic|vevo)/.test(uploader)) {
+    score += 12;
+  }
+
+  if (/(official audio|official video|lyrics|audio oficial|video oficial)/.test(title)) {
+    score += 10;
+  }
+
+  if (/(podcast|audiobook|lecture|sermon|documentary|full album|map of)/.test(title)) {
+    score -= 120;
+  }
+
+  const duration = Number(entry?.duration ?? 0);
+  if (Number.isFinite(duration)) {
+    if (duration >= 60 && duration <= 15 * 60) {
+      score += 14;
+    } else if (duration > 30 * 60) {
+      score -= 60;
+    }
+  }
+
+  return score;
+}
+
 function toNetscapeCookieLine(cookie) {
   const domain = String(cookie.domain ?? "").trim();
   const pathValue = String(cookie.path ?? "/").trim() || "/";
@@ -225,15 +311,26 @@ function writeCookieFile(cookies) {
 }
 
 class StableYtDlpPlugin extends ExtractorPlugin {
-  constructor({ cookies, logger, ytdlpPath = "yt-dlp", poTokenGvs = null, poTokenPlayer = null } = {}) {
+  constructor({
+    cookies,
+    logger,
+    ytdlpPath = "yt-dlp",
+    poTokenGvs = null,
+    poTokenPlayer = null,
+    autoPoTokenTtlMs = DEFAULT_AUTO_PO_TOKEN_TTL_MS,
+  } = {}) {
     super();
     this.logger = logger;
     this.ytdlpPath = ytdlpPath;
     this.poTokenGvs = poTokenGvs;
     this.poTokenPlayer = poTokenPlayer;
+    this.autoPoTokenTtlMs = autoPoTokenTtlMs;
     this.pipedApiBases = splitConfiguredBases(process.env.PIPED_API_BASES, DEFAULT_PIPED_API_BASES);
     this.invidiousApiBases = splitConfiguredBases(process.env.INVIDIOUS_API_BASES, DEFAULT_INVIDIOUS_API_BASES);
     this.cookieFilePath = Array.isArray(cookies) && cookies.length ? writeCookieFile(cookies) : null;
+    this.generatedPoTokenContext = null;
+    this.generatedPoTokenPromise = null;
+    this.generatedPoTokenExpiresAt = 0;
 
     if (this.cookieFilePath) {
       this.logger?.info("Cookies de YouTube escritas.", {
@@ -259,7 +356,14 @@ class StableYtDlpPlugin extends ExtractorPlugin {
     });
   }
 
-  buildExtractorArgs({ playerClient, includeMissingPoFormats = false, poTokenClient = null } = {}) {
+  buildExtractorArgs({
+    playerClient,
+    includeMissingPoFormats = false,
+    poTokenClient = null,
+    visitorData = null,
+    playerSkip = null,
+    skipTabWebpage = false,
+  } = {}) {
     const pieces = [];
 
     if (playerClient) {
@@ -281,12 +385,73 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       pieces.push(`po_token=${poTokens.join(",")}`);
     }
 
+    if (visitorData) {
+      pieces.push(`visitor_data=${visitorData}`);
+    }
+
+    if (playerSkip) {
+      pieces.push(`player_skip=${playerSkip}`);
+    }
+
     const args = ["--no-warnings", "--no-check-certificate"];
     if (pieces.length) {
       args.push("--extractor-args", `youtube:${pieces.join(";")}`);
     }
 
+    if (skipTabWebpage) {
+      args.push("--extractor-args", "youtubetab:skip=webpage");
+    }
+
     return args;
+  }
+
+  async getAutoPoTokenContext(forceRefresh = false) {
+    if (!forceRefresh && this.generatedPoTokenContext && Date.now() < this.generatedPoTokenExpiresAt) {
+      return this.generatedPoTokenContext;
+    }
+
+    if (!forceRefresh && this.generatedPoTokenPromise) {
+      return this.generatedPoTokenPromise;
+    }
+
+    this.generatedPoTokenPromise = (async () => {
+      const generate = await loadPoTokenGenerator();
+      const generated = await generate();
+      const visitorData = generated?.visitorData ?? generated?.visitor_data ?? null;
+      const poToken = generated?.poToken ?? generated?.po_token ?? null;
+
+      if (!visitorData || !poToken) {
+        throw new Error("El generador automatico de PO Token no devolvio visitorData y poToken.");
+      }
+
+      this.generatedPoTokenContext = {
+        visitorData,
+        poTokenGvs: poToken,
+      };
+      this.generatedPoTokenExpiresAt = Date.now() + this.autoPoTokenTtlMs;
+
+      this.logger?.info("PO Token invitado generado automaticamente.");
+      return this.generatedPoTokenContext;
+    })().finally(() => {
+      this.generatedPoTokenPromise = null;
+    });
+
+    return this.generatedPoTokenPromise;
+  }
+
+  getPoTokenModeOptions(context) {
+    return {
+      streamMode: true,
+      includeCookies: false,
+      customBaseArgs: this.buildExtractorArgs({
+        playerClient: "mweb,default,-web,-web_creator",
+        includeMissingPoFormats: true,
+        poTokenClient: "mweb",
+        visitorData: context?.visitorData ?? null,
+        playerSkip: "webpage,configs",
+        skipTabWebpage: Boolean(context?.visitorData),
+      }),
+    };
   }
 
   runYtDlp(args, timeoutMs = 45000, options = {}) {
@@ -333,12 +498,47 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const host = (() => {
+          try {
+            return new URL(url).host;
+          } catch {
+            return url;
+          }
+        })();
+        throw new Error(`HTTP ${response.status} from ${host}`);
       }
 
       return response.json();
     } finally {
       clearTimeout(timeoutId);
+    }
+  }
+
+  async getFallbackMetadataFromOEmbed(url, videoId) {
+    try {
+      const payload = await this.fetchJson(
+        `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`,
+        10000,
+      );
+
+      return {
+        id: videoId,
+        title: payload?.title ?? `YouTube ${videoId}`,
+        uploader: payload?.author_name ?? undefined,
+        thumbnail: payload?.thumbnail_url ?? undefined,
+        webpage_url: url,
+      };
+    } catch (error) {
+      this.logger?.warn("No pude obtener metadata ligera desde oEmbed.", {
+        url,
+        error: error.message,
+      });
+
+      return {
+        id: videoId,
+        title: `YouTube ${videoId}`,
+        webpage_url: url,
+      };
     }
   }
 
@@ -489,40 +689,65 @@ class StableYtDlpPlugin extends ExtractorPlugin {
   }
 
   async resolve(url, options = {}) {
-    const metadata = parseJsonFromOutput(
-      this.runYtDlp(["--dump-single-json", "--flat-playlist", url], 45000).combined,
-    );
-
-    if (Array.isArray(metadata.entries) && metadata.entries.length) {
-      const songs = metadata.entries
-        .filter((entry) => entry?.id)
-        .map((entry) => this.createSong(entry, options, normalizeVideoUrl(entry, url)));
-
-      return new Playlist(
-        {
-          source: "youtube",
-          songs,
-          id: metadata.id ?? undefined,
-          name: metadata.title ?? metadata.playlist_title ?? "Playlist",
-          url: metadata.webpage_url ?? url,
-          thumbnail: pickThumbnail(metadata),
-        },
-        options,
+    try {
+      const metadata = parseJsonFromOutput(
+        this.runYtDlp(["--dump-single-json", "--flat-playlist", url], 45000).combined,
       );
-    }
 
-    return this.createSong(metadata, options, url);
+      if (Array.isArray(metadata.entries) && metadata.entries.length) {
+        const songs = metadata.entries
+          .filter((entry) => entry?.id)
+          .map((entry) => this.createSong(entry, options, normalizeVideoUrl(entry, url)));
+
+        return new Playlist(
+          {
+            source: "youtube",
+            songs,
+            id: metadata.id ?? undefined,
+            name: metadata.title ?? metadata.playlist_title ?? "Playlist",
+            url: metadata.webpage_url ?? url,
+            thumbnail: pickThumbnail(metadata),
+          },
+          options,
+        );
+      }
+
+      return this.createSong(metadata, options, url);
+    } catch (error) {
+      const videoId = extractYouTubeVideoId(url);
+      if (!videoId) {
+        throw error;
+      }
+
+      this.logger?.warn("No pude resolver metadata completa; usando fallback ligero.", {
+        url,
+        error: error.message,
+      });
+
+      const fallbackEntry = await this.getFallbackMetadataFromOEmbed(url, videoId);
+      return this.createSong(fallbackEntry, options, url);
+    }
   }
 
   async searchSong(query, options = {}) {
     const payload = parseJsonFromOutput(
       this.runYtDlp(
-        ["--dump-single-json", "--flat-playlist", "--playlist-end", "1", `ytsearch1:${query}`],
+        [
+          "--dump-single-json",
+          "--flat-playlist",
+          "--playlist-end",
+          `${SEARCH_RESULT_LIMIT}`,
+          `ytsearch${SEARCH_RESULT_LIMIT}:${query}`,
+        ],
         30000,
       ).combined,
     );
 
-    const entry = Array.isArray(payload.entries) ? payload.entries[0] : payload;
+    const entries = Array.isArray(payload.entries) ? payload.entries : [payload];
+    const rankedEntries = entries
+      .filter((entry) => entry?.id)
+      .sort((left, right) => scoreSearchEntry(right, query) - scoreSearchEntry(left, query));
+    const entry = rankedEntries[0] ?? null;
     if (!entry?.id) {
       return null;
     }
@@ -533,6 +758,17 @@ class StableYtDlpPlugin extends ExtractorPlugin {
   async getStreamURL(song) {
     if (song.stream.playFromSource && song.stream.url) {
       return song.stream.url;
+    }
+
+    let generatedPoTokenContext = null;
+    if (!this.poTokenGvs && !this.poTokenPlayer) {
+      try {
+        generatedPoTokenContext = await this.getAutoPoTokenContext();
+      } catch (error) {
+        this.logger?.warn("No pude generar automaticamente un PO Token invitado.", {
+          error: error.message,
+        });
+      }
     }
 
     const selectors = song.isLive
@@ -561,6 +797,13 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       { label: "stream-with-cookies", options: { streamMode: true, includeCookies: true } },
       { label: "default-with-cookies", options: { streamMode: false, includeCookies: true } },
     ];
+
+    if (generatedPoTokenContext) {
+      streamModes.unshift({
+        label: "stream-auto-po-token-mweb",
+        options: this.getPoTokenModeOptions(generatedPoTokenContext),
+      });
+    }
 
     if (this.poTokenGvs || this.poTokenPlayer) {
       streamModes.unshift({
@@ -596,6 +839,13 @@ class StableYtDlpPlugin extends ExtractorPlugin {
         { label: "download-with-cookies", options: { streamMode: true, includeCookies: true } },
         { label: "download-default", options: { streamMode: false, includeCookies: true } },
     ];
+
+    if (generatedPoTokenContext) {
+      downloadModes.unshift({
+        label: "download-auto-po-token-mweb",
+        options: this.getPoTokenModeOptions(generatedPoTokenContext),
+      });
+    }
 
     if (this.poTokenGvs || this.poTokenPlayer) {
       downloadModes.unshift({

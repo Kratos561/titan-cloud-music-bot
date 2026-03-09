@@ -27,6 +27,7 @@
     "express": "^4.21.2",
     "libsodium-wrappers": "^0.7.15",
     "sodium-native": "^5.1.0",
-    "pg": "^8.13.3"
+    "pg": "^8.13.3",
+    "youtube-po-token-generator": "^0.6.0"
   }
 }
