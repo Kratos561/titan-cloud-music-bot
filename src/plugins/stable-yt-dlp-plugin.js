@@ -349,11 +349,15 @@ class StableYtDlpPlugin extends ExtractorPlugin {
   }
 
   get baseArgs() {
-    const args = ["--no-warnings", "--no-check-certificate"];
-
+    const args = [...this.sharedArgs];
     if (this.cookieFilePath) {
       args.push("--cookies", this.cookieFilePath);
     }
+    return args;
+  }
+
+  get sharedArgs() {
+    const args = ["--no-warnings", "--no-check-certificate"];
 
     if (this.bgutilScriptPath) {
       args.push(
@@ -409,7 +413,7 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       pieces.push(`player_skip=${playerSkip}`);
     }
 
-    const args = ["--no-warnings", "--no-check-certificate"];
+    const args = [...this.sharedArgs];
     if (pieces.length) {
       args.push("--extractor-args", `youtube:${pieces.join(";")}`);
     }
@@ -794,25 +798,11 @@ class StableYtDlpPlugin extends ExtractorPlugin {
           "b[acodec!=none]/best[acodec!=none]",
           "b/best",
         ];
+    const hasCookies = Boolean(this.cookieFilePath);
 
     let streamUrl = null;
     let lastError = null;
-    const streamModes = [
-      {
-        label: "stream-safari-hls",
-        options: {
-          streamMode: true,
-          includeCookies: false,
-          customBaseArgs: this.buildExtractorArgs({
-            playerClient: "web_safari,-web,-web_creator,-mweb",
-            includeMissingPoFormats: true,
-          }),
-        },
-      },
-      { label: "stream-no-cookies", options: { streamMode: true, includeCookies: false } },
-      { label: "stream-with-cookies", options: { streamMode: true, includeCookies: true } },
-      { label: "default-with-cookies", options: { streamMode: false, includeCookies: true } },
-    ];
+    const streamModes = [];
 
     if (generatedPoTokenContext) {
       streamModes.unshift({
@@ -836,12 +826,16 @@ class StableYtDlpPlugin extends ExtractorPlugin {
       });
     }
 
-    const downloadSelectors = song.isLive
-      ? ["b/best", null]
-      : ["ba/b", "b/best", null];
-    const downloadModes = [
+    if (hasCookies) {
+      streamModes.push(
+        { label: "stream-with-cookies", options: { streamMode: true, includeCookies: true } },
+        { label: "default-with-cookies", options: { streamMode: false, includeCookies: true } },
+        { label: "stream-no-cookies", options: { streamMode: true, includeCookies: false } },
+      );
+    } else {
+      streamModes.push(
         {
-          label: "download-safari-hls",
+          label: "stream-safari-hls",
           options: {
             streamMode: true,
             includeCookies: false,
@@ -851,10 +845,14 @@ class StableYtDlpPlugin extends ExtractorPlugin {
             }),
           },
         },
-        { label: "download-no-cookies", options: { streamMode: true, includeCookies: false } },
-        { label: "download-with-cookies", options: { streamMode: true, includeCookies: true } },
-        { label: "download-default", options: { streamMode: false, includeCookies: true } },
-    ];
+        { label: "stream-no-cookies", options: { streamMode: true, includeCookies: false } },
+      );
+    }
+
+    const downloadSelectors = song.isLive
+      ? ["b/best", null]
+      : ["ba/b", "b/best", null];
+    const downloadModes = [];
 
     if (generatedPoTokenContext) {
       downloadModes.unshift({
@@ -876,6 +874,29 @@ class StableYtDlpPlugin extends ExtractorPlugin {
           }),
         },
       });
+    }
+
+    if (hasCookies) {
+      downloadModes.push(
+        { label: "download-with-cookies", options: { streamMode: true, includeCookies: true } },
+        { label: "download-default", options: { streamMode: false, includeCookies: true } },
+        { label: "download-no-cookies", options: { streamMode: true, includeCookies: false } },
+      );
+    } else {
+      downloadModes.push(
+        {
+          label: "download-safari-hls",
+          options: {
+            streamMode: true,
+            includeCookies: false,
+            customBaseArgs: this.buildExtractorArgs({
+              playerClient: "web_safari,-web,-web_creator,-mweb",
+              includeMissingPoFormats: true,
+            }),
+          },
+        },
+        { label: "download-no-cookies", options: { streamMode: true, includeCookies: false } },
+      );
     }
 
     if (!song.isLive) {
